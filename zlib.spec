@@ -1,68 +1,80 @@
 %define alicloud_base_release 1
+
+%bcond_without minizip
+
+Name:    zlib
+Version: 1.2.11
+Release: 20.%{alicloud_base_release}%{?dist}.alnx
 Summary: The compression and decompression library
-Name: zlib
-Version: 1.2.7
-Release: 18.%{alicloud_base_release}%{?dist}
 # /contrib/dotzlib/ have Boost license
 License: zlib and Boost
-Group: System Environment/Libraries
 URL: http://www.zlib.net/
-Source: http://www.zlib.net/zlib-%{version}.tar.bz2
 
+Source: http://www.zlib.net/zlib-%{version}.tar.xz
+# https://github.com/madler/zlib/pull/210
 Patch0: zlib-1.2.5-minizip-fixuncrypt.patch
 # resolves: #805113
-Patch1: zlib-1.2.7-optimized-s390.patch
-# resolves: #844791
-Patch2: zlib-1.2.7-z-block-flush.patch
-# resolves: #1127330
-Patch3: zlib-1.2.7-fix-serious-but-very-rare-decompression-bug-in-inftr.patch
-# resolves: #1337441
-Patch4: zlib-1.2.7-Fix-bug-where-gzopen-gzclose-would-write-an-empty-fi.patch
+Patch1: zlib-1.2.11-optimized-s390.patch
+# general aarch64 optimizations
+Patch4: 0001-Neon-Optimized-hash-chain-rebase.patch
+Patch5: 0002-Porting-optimized-longest_match.patch
+Patch6: 0003-arm64-specific-build-patch.patch
+# IBM Z optimalizations
+Patch7: zlib-1.2.11-IBM-Z-hw-accelrated-deflate-s390x.patch
+# IBM CRC32 optimalization for POWER archs
+Patch8: zlib-1.2.11-optimized-CRC32-framework.patch
+# fixed firefox crash + added test case
+Patch9: zlib-1.2.11-firefox-crash-fix.patch
 
 BuildRequires: automake, autoconf, libtool
+
+%global __provides_exclude_from ^%{_libdir}/pkgconfig/minizip\\.pc$
 
 %description
 Zlib is a general-purpose, patent-free, lossless data compression
 library which is used by many different programs.
 
+
 %package devel
 Summary: Header files and libraries for Zlib development
-Group: Development/Libraries
-Requires: %{name} = %{version}-%{release}
+Requires: %{name}%{?_isa} = %{version}-%{release}
 
 %description devel
 The zlib-devel package contains the header files and libraries needed
 to develop programs that use the zlib compression and decompression
 library.
 
+
 %package static
 Summary: Static libraries for Zlib development
-Group: Development/Libraries
-Requires: %{name}-devel = %{version}-%{release}
+Requires: %{name}-devel%{?_isa} = %{version}-%{release}
 
 %description static
 The zlib-static package includes static libraries needed
 to develop programs that use the zlib compression and
 decompression library.
 
-%package -n minizip
-Summary: Library for manipulation with .zip archives
-Group: System Environment/Libraries
-Requires: %{name} = %{version}-%{release}
 
-%description -n minizip
+%if %{with minizip}
+%package -n minizip-compat
+Summary: Library for manipulation with .zip archives
+Requires: %{name}%{?_isa} = %{version}-%{release}
+
+%description -n minizip-compat
 Minizip is a library for manipulation with files from .zip archives.
 
-%package -n minizip-devel
-Summary: Development files for the minizip library
-Group: Development/Libraries
-Requires: minizip = %{version}-%{release}
-Requires: %{name}-devel = %{version}-%{release}
-Requires: pkgconfig
 
-%description -n minizip-devel
+%package -n minizip-compat-devel
+Summary: Development files for the minizip library
+Requires: minizip-compat%{?_isa} = %{version}-%{release}
+Requires: %{name}-devel%{?_isa} = %{version}-%{release}
+Conflicts: minizip-devel
+
+%description -n minizip-compat-devel
 This package contains the libraries and header files needed for
 developing applications which use minizip.
+%endif
+
 
 %prep
 %setup -q
@@ -70,105 +82,207 @@ developing applications which use minizip.
 %ifarch s390 s390x
 %patch1 -p1 -b .optimized-deflate
 %endif
-%patch2 -p1 -b .z-flush
+%ifarch aarch64
+%patch4 -p1 -b .optimize-aarch64
+%patch5 -p1 -b .optimize-aarch64
+%patch6 -p1 -b .optimize-aarch64
+%endif
+%patch7 -p1
+%patch8 -p1
+%patch9 -p1
+
+
 iconv -f iso-8859-2 -t utf-8 < ChangeLog > ChangeLog.tmp
 mv ChangeLog.tmp ChangeLog
 
-%patch3 -p1
-%patch4 -p1
 
 %build
-%ifarch ppc64 ppc64le
-export CFLAGS="$RPM_OPT_FLAGS -O3"
-%else
 export CFLAGS="$RPM_OPT_FLAGS"
+%ifarch ppc64
+CFLAGS+=" -O3"
+%endif
+%ifarch aarch64
+CFLAGS+=" -DARM_NEON -O3"
+%endif
+%ifarch s390 s390x
+CFLAGS+=" -DDFLTCC"
+%endif
+
+export MKFLAGS=""
+%ifarch s390 s390x
+MKFLAGS+="OBJA=dfltcc.o PIC_OBJA=dfltcc.lo"
 %endif
 
 export LDFLAGS="$LDFLAGS -Wl,-z,relro -Wl,-z,now"
+# no-autotools, %%configure is not compatible
 ./configure --libdir=%{_libdir} --includedir=%{_includedir} --prefix=%{_prefix}
-make %{?_smp_mflags}
+%make_build $MKFLAGS
 
+%if %{with minizip}
 cd contrib/minizip
 autoreconf --install
 %configure --enable-static=no
-make %{?_smp_mflags}
+%make_build
+%endif
+
 
 %check
 make test
 
+
 %install
-make install DESTDIR=$RPM_BUILD_ROOT
+%make_install
 
-cd contrib/minizip
-make install DESTDIR=$RPM_BUILD_ROOT
+%if %{with minizip}
+%make_install -C contrib/minizip
+# https://github.com/madler/zlib/pull/229
+rm $RPM_BUILD_ROOT%_includedir/minizip/crypt.h
+%endif
 
-rm -f $RPM_BUILD_ROOT%{_libdir}/*.la
+find $RPM_BUILD_ROOT -name '*.la' -delete
 
-%post -p /sbin/ldconfig
-
-%postun -p /sbin/ldconfig
-
-%post -n minizip -p /sbin/ldconfig
-
-%postun -n minizip -p /sbin/ldconfig
 
 %files
-%doc README ChangeLog FAQ
+%license README
+%doc ChangeLog FAQ
 %{_libdir}/libz.so.*
 
+
 %files devel
-%doc README doc/algorithm.txt test/example.c
+%doc doc/algorithm.txt test/example.c
 %{_libdir}/libz.so
 %{_libdir}/pkgconfig/zlib.pc
 %{_includedir}/zlib.h
 %{_includedir}/zconf.h
 %{_mandir}/man3/zlib.3*
 
+
 %files static
-%doc README
+%license README
 %{_libdir}/libz.a
 
-%files -n minizip
+
+%if %{with minizip}
+%files -n minizip-compat
 %doc contrib/minizip/MiniZip64_info.txt contrib/minizip/MiniZip64_Changes.txt
 %{_libdir}/libminizip.so.*
 
-%files -n minizip-devel
+
+%files -n minizip-compat-devel
 %dir %{_includedir}/minizip
 %{_includedir}/minizip/*.h
 %{_libdir}/libminizip.so
 %{_libdir}/pkgconfig/minizip.pc
+%endif
+
 
 %changelog
-* Fri Dec 07 2018 leilei.lin <leilei.lin@alibaba-inc.com> - 1.2.7-18
-- rebuild for alinux7u6-os
+* Fri Feb 21 2020 Chunmei Xu <xuchunmei@linux.alibaba.con> - 1.2.11-20.1.alnx
+- Rebuild for Alibaba Cloud Linux
 
-* Mon Jul 09 2018 Pavel Raiskup <praiskup@redhat.com> - 1.2.7-18
+* Tue Oct 29 2019 Ondrej Dubaj <odubaj@redhat.com> - 1.2.11-20
+- Added -DDFLTCC parameter to configure to enable 
+- Z hardware-accelerated deflate for s390x architectures
+
+* Thu Sep 05 2019 Ondrej Dubaj <odubaj@redhat.com> - 1.2.11-19
+- IBM CRC32 optimalization for POWER 8+ architectures re-add
+- fixed firefox crash duer to zlib (#1741266)
+- added test for crc32
+
+* Thu Aug 15 2019 Ondrej Dubaj <odubaj@redhat.com> - 1.2.11-18
+- IBM CRC32 optimalization for POWER 8+ architectures revert
+
+* Thu Aug 01 2019 Ondrej Dubaj <odubaj@redhat.com> - 1.2.11-17
+- IBM Z hardware-accelerated deflate for s390x architectures
+- IBM CRC32 optimalization for POWER 8+ architectures
+
+* Sat Jul 27 2019 Fedora Release Engineering <releng@fedoraproject.org> - 1.2.11-16
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_31_Mass_Rebuild
+
+* Sun Feb 03 2019 Fedora Release Engineering <releng@fedoraproject.org> - 1.2.11-15
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
+
+* Tue Oct  2 2018 Peter Robinson <pbrobinson@fedoraproject.org> 1.2.11-14
+- Bump build
+
+* Tue Sep 18 2018 Peter Robinson <pbrobinson@fedoraproject.org> 1.2.11-13
+- Revert aarch64 neon inflate optimisation
+
+* Wed Aug 29 2018 Patrik Novotný <panovotn@redhat.com> - 1.2.11-12
+- Rename minizip and minizip-devel to minizip-compat and minizip-compat-devel respectively
+
+* Thu Aug 23 2018 Patrik Novotný <panovotn@redhat.com> - 1.2.11-11
+- Provides minizip-compat and minizip-compat-devel
+
+* Fri Aug 03 2018 Pavel Raiskup <praiskup@redhat.com> - 1.2.11-10
+- add %%bcond for minizip
+- use %%make_* macros
+
+* Sat Jul 14 2018 Fedora Release Engineering <releng@fedoraproject.org> - 1.2.11-9
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_29_Mass_Rebuild
+
+* Mon Apr 30 2018 Peter Robinson <pbrobinson@fedoraproject.org> 1.2.11-8
+- Optimisations for aarch64
+- Minor spec cleanups
+
+* Thu Mar 15 2018 Pavel Raiskup <praiskup@redhat.com> - 1.2.11-7
+- don't install crypt.h (rhbz#1424609)
+
+* Fri Feb 09 2018 Fedora Release Engineering <releng@fedoraproject.org> - 1.2.11-6
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_28_Mass_Rebuild
+
+* Fri Feb 02 2018 Igor Gnatenko <ignatenkobrain@fedoraproject.org> - 1.2.11-5
+- Switch to %%ldconfig_scriptlets
+
+* Thu Aug 03 2017 Fedora Release Engineering <releng@fedoraproject.org> - 1.2.11-4
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_27_Binutils_Mass_Rebuild
+
+* Thu Jul 27 2017 Fedora Release Engineering <releng@fedoraproject.org> - 1.2.11-3
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_27_Mass_Rebuild
+
+* Thu Feb 09 2017 Pavel Raiskup <praiskup@redhat.com> - 1.2.11-2
+- fix s390(x) optimizing patch (FTBFS on s390(x))
+- simplify ppc64 hack with -O3
+
+* Mon Jan 30 2017 Pavel Raiskup <praiskup@redhat.com> - 1.2.11-1
+- latest upstream release (rhbz#1409372)
+- cleanup rpmlint
+- revert fix for rhbz#985344
+- requires with %%_isa tag
+- drop zlib Z_BLOCK flush patch (rhbz#1417355)
+
+* Fri Feb 05 2016 Fedora Release Engineering <releng@fedoraproject.org> - 1.2.8-10
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_24_Mass_Rebuild
+
+* Fri Aug 14 2015 Adam Jackson <ajax@redhat.com> 1.2.8-9
 - Link with -z now for full RELRO
 
-* Thu May 19 2016 jchaloup <jchaloup@redhat.com> - 1.2.7-17
-- Fix writing empty files on gzopen()/gzclose()
-  resolves: #1337441
+* Fri Jun 19 2015 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.2.8-8
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_23_Mass_Rebuild
 
-* Wed Apr 27 2016 jchaloup <jchaloup@redhat.com> - 1.2.7-16
-- Fix serious but very rare decompression bug in inftrees.c (upstream patch)
-  resolves: #1127330
+* Mon Aug 18 2014 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.2.8-7
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_21_22_Mass_Rebuild
 
-* Tue May 12 2015 Peter Robinson <pbrobinson@redhat.com> 1.2.7-15
-- Rebuild for rhbz #1123500
+* Wed Aug  6 2014 Tom Callaway <spot@fedoraproject.org> - 1.2.8-6
+- fix license handling
 
-* Thu Jul 31 2014 jchaloup <jchaloup@redhat.com> - 1.2.7-14
-- resolves: #1123500
-  recompiled with -O3 flag for ppc64le arch
+* Sat Jun 07 2014 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.2.8-5
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_21_Mass_Rebuild
 
-* Fri Jan 24 2014 Daniel Mach <dmach@redhat.com> - 1.2.7-13
-- Mass rebuild 2014-01-24
-
-* Fri Jan 10 2014 Peter Schiffer <pschiffe@redhat.com> - 1.2.7-12
-- resolves: #1051079
+* Wed Feb 12 2014 jchaloup <jchaloup@redhat.com> - 1.2.8-4
+- resolves: #1064213
   recompiled with -O3 flag for ppc64 arch
 
-* Fri Dec 27 2013 Daniel Mach <dmach@redhat.com> - 1.2.7-11
-- Mass rebuild 2013-12-27
+* Sat Aug 10 2013 Kalev Lember <kalevlember@gmail.com> - 1.2.8-3
+- resolves: #985344
+  add a patch to fix missing minizip include
+
+* Sun Aug 04 2013 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.2.8-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_20_Mass_Rebuild
+
+* Fri Jun  7 2013 Peter Schiffer <pschiffe@redhat.com> - 1.2.8-1
+- resolves: #957680
+  updated to 1.2.8
 
 * Fri Feb 15 2013 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.2.7-10
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_19_Mass_Rebuild
