@@ -1,4 +1,4 @@
-%define alicloud_base_release 1
+%define alicloud_base_release 2
 
 %bcond_without minizip
 
@@ -25,6 +25,8 @@ Patch7: zlib-1.2.11-IBM-Z-hw-accelrated-deflate-s390x.patch
 Patch8: zlib-1.2.11-optimized-CRC32-framework.patch
 # fixed firefox crash + added test case
 Patch9: zlib-1.2.11-firefox-crash-fix.patch
+# optimized CRC32 function in armv8
+Patch10: 0004-compute-crc32-using-armv8-specific-instruction.patch
 
 BuildRequires: automake, autoconf, libtool
 
@@ -87,10 +89,16 @@ developing applications which use minizip.
 %patch5 -p1 -b .optimize-aarch64
 %patch6 -p1 -b .optimize-aarch64
 %endif
+%ifarch s390 s390x
 %patch7 -p1
+%endif
+%ifarch ppc ppc64 ppc64le
 %patch8 -p1
 %patch9 -p1
-
+%endif
+%ifarch aarch64
+%patch10 -p1
+%endif
 
 iconv -f iso-8859-2 -t utf-8 < ChangeLog > ChangeLog.tmp
 mv ChangeLog.tmp ChangeLog
@@ -103,6 +111,7 @@ CFLAGS+=" -O3"
 %endif
 %ifarch aarch64
 CFLAGS+=" -DARM_NEON -O3"
+CFLAGS+=" -march=armv8-a+crc"
 %endif
 %ifarch s390 s390x
 CFLAGS+=" -DDFLTCC"
@@ -177,6 +186,9 @@ find $RPM_BUILD_ROOT -name '*.la' -delete
 
 
 %changelog
+* Sat Feb 29 2020 Chunmei Xu <xuchunmei@linux.alibaba.con> - 1.2.11-20.2.alnx
+- optimized crc32 function in armv8
+
 * Fri Feb 21 2020 Chunmei Xu <xuchunmei@linux.alibaba.con> - 1.2.11-20.1.alnx
 - Rebuild for Alibaba Cloud Linux
 

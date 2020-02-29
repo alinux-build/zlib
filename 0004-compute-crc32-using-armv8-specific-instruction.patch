@@ -1,0 +1,240 @@
+From 23e2623f8b9e64872fa1f512bd296d96e122fd88 Mon Sep 17 00:00:00 2001
+From: Chunmei Xu <xuchunmei@linux.alibaba.com>
+Date: Sat, 29 Feb 2020 17:12:31 +0800
+Subject: [PATCH] compute crc32 using armv8 specific instruction
+
+backport crc32_acle.c from zlib-ng project
+https://github.com/zlib-ng/zlib-ng/blob/develop/arch/arm/crc32_acle.c
+
+Signed-off-by: Chunmei Xu <xuchunmei@linux.alibaba.com>
+---
+ Makefile.in              |  16 +++++--
+ contrib/arm/crc32_acle.c | 111 +++++++++++++++++++++++++++++++++++++++++++++++
+ crc32.c                  |  12 +++++
+ 3 files changed, 135 insertions(+), 4 deletions(-)
+ create mode 100644 contrib/arm/crc32_acle.c
+
+diff --git a/Makefile.in b/Makefile.in
+index 9f088e5..0ae9acc 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -57,11 +57,11 @@ SRCDIR=
+ ZINC=
+ ZINCOUT=-I.
+ 
+-OBJZ = adler32.o crc32.o deflate.o infback.o inffast.o inffast.o inflate.o inftrees.o trees.o zutil.o
++OBJZ = adler32.o crc32_acle.o crc32.o deflate.o infback.o inffast.o inffast.o inflate.o inftrees.o trees.o zutil.o
+ OBJG = compress.o uncompr.o gzclose.o gzlib.o gzread.o gzwrite.o
+ OBJC = $(OBJZ) $(OBJG)
+ 
+-PIC_OBJZ = adler32.lo crc32.lo deflate.lo infback.lo inffast.lo inflate.lo inftrees.lo trees.lo zutil.lo
++PIC_OBJZ = adler32.lo crc32_acle.lo crc32.lo deflate.lo infback.lo inffast.lo inflate.lo inftrees.lo trees.lo zutil.lo
+ PIC_OBJG = compress.lo uncompr.lo gzclose.lo gzlib.lo gzread.lo gzwrite.lo
+ PIC_OBJC = $(PIC_OBJZ) $(PIC_OBJG)
+ 
+@@ -155,10 +155,12 @@ example64.o: $(SRCDIR)test/example.c $(SRCDIR)zlib.h zconf.h
+ minigzip64.o: $(SRCDIR)test/minigzip.c $(SRCDIR)zlib.h zconf.h
+ 	$(CC) $(CFLAGS) $(ZINCOUT) -D_FILE_OFFSET_BITS=64 -c -o $@ $(SRCDIR)test/minigzip.c
+ 
+-
+ adler32.o: $(SRCDIR)adler32.c
+ 	$(CC) $(CFLAGS) $(ZINC) -c -o $@ $(SRCDIR)adler32.c
+ 
++crc32_acle.o: $(SRCDIR)contrib/arm/crc32_acle.c
++	$(CC) $(CFLAGS) $(ZINC) -I$(SRCDIR) -c -o $@ $(SRCDIR)contrib/arm/crc32_acle.c
++
+ crc32.o: $(SRCDIR)crc32.c
+ 	$(CC) $(CFLAGS) $(ZINC) -c -o $@ $(SRCDIR)crc32.c
+ 
+@@ -201,12 +203,16 @@ gzread.o: $(SRCDIR)gzread.c
+ gzwrite.o: $(SRCDIR)gzwrite.c
+ 	$(CC) $(CFLAGS) $(ZINC) -c -o $@ $(SRCDIR)gzwrite.c
+ 
+-
+ adler32.lo: $(SRCDIR)adler32.c
+ 	-@mkdir objs 2>/dev/null || test -d objs
+ 	$(CC) $(SFLAGS) $(ZINC) -DPIC -c -o objs/adler32.o $(SRCDIR)adler32.c
+ 	-@mv objs/adler32.o $@
+ 
++crc32_acle.lo: $(SRCDIR)contrib/arm/crc32_acle.c
++	-@mkdir objs 2>/dev/null || test -d objs
++	$(CC) $(SFLAGS) $(ZINC) -I$(SRCDIR) -DPIC -c -o objs/crc32_acle.o $(SRCDIR)contrib/arm/crc32_acle.c
++	-@mv objs/crc32_acle.o $@
++
+ crc32.lo: $(SRCDIR)crc32.c
+ 	-@mkdir objs 2>/dev/null || test -d objs
+ 	$(CC) $(SFLAGS) $(ZINC) -DPIC -c -o objs/crc32.o $(SRCDIR)crc32.c
+@@ -397,6 +403,7 @@ tags:
+ adler32.o zutil.o: $(SRCDIR)zutil.h $(SRCDIR)zlib.h zconf.h
+ gzclose.o gzlib.o gzread.o gzwrite.o: $(SRCDIR)zlib.h zconf.h $(SRCDIR)gzguts.h
+ compress.o example.o minigzip.o uncompr.o: $(SRCDIR)zlib.h zconf.h
++crc32_acle.o: zconf.h
+ crc32.o: $(SRCDIR)zutil.h $(SRCDIR)zlib.h zconf.h $(SRCDIR)crc32.h
+ deflate.o: $(SRCDIR)deflate.h $(SRCDIR)zutil.h $(SRCDIR)zlib.h zconf.h
+ infback.o inflate.o: $(SRCDIR)zutil.h $(SRCDIR)zlib.h zconf.h $(SRCDIR)inftrees.h $(SRCDIR)inflate.h $(SRCDIR)inffast.h $(SRCDIR)inffixed.h
+@@ -407,6 +414,7 @@ trees.o: $(SRCDIR)deflate.h $(SRCDIR)zutil.h $(SRCDIR)zlib.h zconf.h $(SRCDIR)tr
+ adler32.lo zutil.lo: $(SRCDIR)zutil.h $(SRCDIR)zlib.h zconf.h
+ gzclose.lo gzlib.lo gzread.lo gzwrite.lo: $(SRCDIR)zlib.h zconf.h $(SRCDIR)gzguts.h
+ compress.lo example.lo minigzip.lo uncompr.lo: $(SRCDIR)zlib.h zconf.h
++crc32_acle.lo: zconf.h
+ crc32.lo: $(SRCDIR)zutil.h $(SRCDIR)zlib.h zconf.h $(SRCDIR)crc32.h
+ deflate.lo: $(SRCDIR)deflate.h $(SRCDIR)zutil.h $(SRCDIR)zlib.h zconf.h
+ infback.lo inflate.lo: $(SRCDIR)zutil.h $(SRCDIR)zlib.h zconf.h $(SRCDIR)inftrees.h $(SRCDIR)inflate.h $(SRCDIR)inffast.h $(SRCDIR)inffixed.h
+diff --git a/contrib/arm/crc32_acle.c b/contrib/arm/crc32_acle.c
+new file mode 100644
+index 0000000..2da1808
+--- /dev/null
++++ b/contrib/arm/crc32_acle.c
+@@ -0,0 +1,111 @@
++/* crc32_acle.c -- compute the CRC-32 of a data stream
++ * Copyright (C) 1995-2006, 2010, 2011, 2012 Mark Adler
++ * Copyright (C) 2016 Yang Zhang
++ * For conditions of distribution and use, see copyright notice in zlib.h
++ *
++*/
++
++#ifdef __ARM_FEATURE_CRC32
++# include <arm_acle.h>
++#  include <zconf.h>
++# ifdef __linux__
++#  include <stddef.h>
++# endif
++
++uint32_t crc32_acle(uint32_t crc, const unsigned char *buf, uint64_t len) {
++    register uint32_t c;
++    register const uint16_t *buf2;
++    register const uint32_t *buf4;
++
++    c = ~crc;
++    if (len && ((ptrdiff_t)buf & 1)) {
++        c = __crc32b(c, *buf++);
++        len--;
++    }
++
++    if ((len > sizeof(uint16_t)) && ((ptrdiff_t)buf & sizeof(uint16_t))) {
++        buf2 = (const uint16_t *) buf;
++        c = __crc32h(c, *buf2++);
++        len -= sizeof(uint16_t);
++        buf4 = (const uint32_t *) buf2;
++    } else {
++        buf4 = (const uint32_t *) buf;
++    }
++
++# if defined(__aarch64__)
++    if ((len > sizeof(uint32_t)) && ((ptrdiff_t)buf & sizeof(uint32_t))) {
++        c = __crc32w(c, *buf4++);
++        len -= sizeof(uint32_t);
++    }
++
++    const uint64_t *buf8 = (const uint64_t *) buf4;
++
++#  ifdef UNROLL_MORE
++    while (len >= 4 * sizeof(uint64_t)) {
++        c = __crc32d(c, *buf8++);
++        c = __crc32d(c, *buf8++);
++        c = __crc32d(c, *buf8++);
++        c = __crc32d(c, *buf8++);
++        len -= 4 * sizeof(uint64_t);
++    }
++#  endif
++
++    while (len >= sizeof(uint64_t)) {
++        c = __crc32d(c, *buf8++);
++        len -= sizeof(uint64_t);
++    }
++
++    if (len >= sizeof(uint32_t)) {
++        buf4 = (const uint32_t *) buf8;
++        c = __crc32w(c, *buf4++);
++        len -= sizeof(uint32_t);
++        buf2 = (const uint16_t *) buf4;
++    } else {
++        buf2 = (const uint16_t *) buf8;
++    }
++
++    if (len >= sizeof(uint16_t)) {
++        c = __crc32h(c, *buf2++);
++        len -= sizeof(uint16_t);
++    }
++
++    buf = (const unsigned char *) buf2;
++# else /* __aarch64__ */
++
++#  ifdef UNROLL_MORE
++    while (len >= 8 * sizeof(uint32_t)) {
++        c = __crc32w(c, *buf4++);
++        c = __crc32w(c, *buf4++);
++        c = __crc32w(c, *buf4++);
++        c = __crc32w(c, *buf4++);
++        c = __crc32w(c, *buf4++);
++        c = __crc32w(c, *buf4++);
++        c = __crc32w(c, *buf4++);
++        c = __crc32w(c, *buf4++);
++        len -= 8 * sizeof(uint32_t);
++    }
++#  endif
++
++    while (len >= sizeof(uint32_t)) {
++        c = __crc32w(c, *buf4++);
++        len -= sizeof(uint32_t);
++    }
++
++    if (len >= sizeof(uint16_t)) {
++        buf2 = (const uint16_t *) buf4;
++        c = __crc32h(c, *buf2++);
++        len -= sizeof(uint16_t);
++        buf = (const unsigned char *) buf2;
++    } else {
++        buf = (const unsigned char *) buf4;
++    }
++# endif /* __aarch64__ */
++
++    if (len) {
++        c = __crc32b(c, *buf);
++    }
++
++    c = ~c;
++    return c;
++}
++#endif /* __ARM_FEATURE_CRC32 */
+diff --git a/crc32.c b/crc32.c
+index 9580440..8338dbc 100644
+--- a/crc32.c
++++ b/crc32.c
+@@ -30,6 +30,10 @@
+ 
+ #include "zutil.h"      /* for STDC and FAR definitions */
+ 
++#if defined(__ARM_FEATURE_CRC32)
++#include <arm_acle.h>
++#endif
++
+ /* Definitions for doing the crc four data bytes at a time. */
+ #if !defined(NOBYFOUR) && defined(Z_U4)
+ #  define BYFOUR
+@@ -198,6 +202,10 @@ const z_crc_t FAR * ZEXPORT get_crc_table()
+ #define DO1 crc = crc_table[0][((int)crc ^ (*buf++)) & 0xff] ^ (crc >> 8)
+ #define DO8 DO1; DO1; DO1; DO1; DO1; DO1; DO1; DO1
+ 
++#if defined(__ARM_FEATURE_CRC32)
++extern uint32_t crc32_acle(uint32_t, const unsigned char *, uint64_t);
++#endif
++
+ /* ========================================================================= */
+ unsigned long ZEXPORT crc32_z(crc, buf, len)
+     unsigned long crc;
+@@ -217,7 +225,11 @@ unsigned long ZEXPORT crc32_z(crc, buf, len)
+ 
+         endian = 1;
+         if (*((unsigned char *)(&endian)))
++#if defined(__ARM_FEATURE_CRC32)
++            return crc32_acle(crc, buf, len);
++#else
+             return crc32_little(crc, buf, len);
++#endif
+         else
+             return crc32_big(crc, buf, len);
+     }
+-- 
+1.8.3.1
+
