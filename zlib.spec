@@ -1,4 +1,4 @@
-%define alicloud_base_release 2
+%define alicloud_base_release 3
 
 %bcond_without minizip
 
@@ -150,6 +150,14 @@ rm $RPM_BUILD_ROOT%_includedir/minizip/crypt.h
 
 find $RPM_BUILD_ROOT -name '*.la' -delete
 
+%post -p /sbin/ldconfig
+
+%postun -p /sbin/ldconfig
+
+%if %{with minizip}
+%post -n minizip-compat -p /sbin/ldconfig
+%postun -n minizip-compat -p /sbin/ldconfig
+%endif
 
 %files
 %license README
@@ -186,6 +194,9 @@ find $RPM_BUILD_ROOT -name '*.la' -delete
 
 
 %changelog
+* Tue Mar 3 2020 Chunmei Xu <xuchunmei@linux.alibaba.con> - 1.2.11-20.3.alnx
+- add ldconfig in %post and %postun
+
 * Sat Feb 29 2020 Chunmei Xu <xuchunmei@linux.alibaba.con> - 1.2.11-20.2.alnx
 - optimized crc32 function in armv8
 
