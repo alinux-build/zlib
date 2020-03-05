@@ -1,0 +1,152 @@
+From a036b584c292e7b67336d3abee65e2415cb68be9 Mon Sep 17 00:00:00 2001
+From: Chunmei Xu <xuchunmei@linux.alibaba.com>
+Date: Thu, 5 Mar 2020 11:22:11 +0800
+Subject: [PATCH] ARM optimized insert_string
+
+refer to
+https://chromium-review.googlesource.com/c/chromium/src/+/1173262
+
+Signed-off-by: Chunmei Xu <xuchunmei@linux.alibaba.com>
+---
+ contrib/arm/insert_string_acle.h | 37 +++++++++++++++++++++++++++++++++++
+ deflate.c                        | 42 ++++++++++++++++++++++++----------------
+ 2 files changed, 62 insertions(+), 17 deletions(-)
+ create mode 100644 contrib/arm/insert_string_acle.h
+
+diff --git a/contrib/arm/insert_string_acle.h b/contrib/arm/insert_string_acle.h
+new file mode 100644
+index 0000000..5f3c5e1
+--- /dev/null
++++ b/contrib/arm/insert_string_acle.h
+@@ -0,0 +1,37 @@
++/* insert_string_acle.h -- insert_string variant using ACLE's CRC instructions
++ *
++ * Copyright (C) 1995-2013 Jean-loup Gailly and Mark Adler
++ * For conditions of distribution and use, see copyright notice in zlib.h
++ *
++ */
++
++#if defined(__ARM_FEATURE_CRC32)
++#include <arm_acle.h>
++
++/* ===========================================================================
++ * Insert string str in the dictionary and set match_head to the previous head
++ * of the hash chain (the most recent string with same hash key). Return
++ * the previous length of the hash chain.
++ * IN  assertion: all calls to to INSERT_STRING are made with consecutive
++ *    input characters and the first MIN_MATCH bytes of str are valid
++ *    (except for the last MIN_MATCH-1 bytes of the input file).
++ */
++local inline Pos insert_string_acle(deflate_state *const s, const Pos str) {
++    Pos ret;
++    unsigned *ip, val, h = 0;
++
++    ip = (unsigned *)&s->window[str];
++    val = *ip;
++
++    if (s->level >= 6)
++        val &= 0xFFFFFF;
++
++    h = __crc32w(h, val);
++
++    ret = s->head[h & s->hash_mask];
++    s->head[h & s->hash_mask] = str;
++    s->prev[str & s->w_mask] = ret;
++    return ret;
++}
++#endif
++
+diff --git a/deflate.c b/deflate.c
+index 4c42259..397f8c6 100644
+--- a/deflate.c
++++ b/deflate.c
+@@ -173,17 +173,29 @@ local const config configuration_table[10] = {
+  *    characters and the first MIN_MATCH bytes of str are valid (except for
+  *    the last MIN_MATCH-1 bytes of the input file).
+  */
++static inline Pos insert_string_c(deflate_state *s, Pos str) {
++    Pos match_head;
++
++    UPDATE_HASH(s, s->ins_h, s->window[(str) + (MIN_MATCH-1)]);
+ #ifdef FASTEST
+-#define INSERT_STRING(s, str, match_head) \
+-   (UPDATE_HASH(s, s->ins_h, s->window[(str) + (MIN_MATCH-1)]), \
+-    match_head = s->head[s->ins_h], \
+-    s->head[s->ins_h] = (Pos)(str))
++    match_head = s->head[s->ins_h];
+ #else
+-#define INSERT_STRING(s, str, match_head) \
+-   (UPDATE_HASH(s, s->ins_h, s->window[(str) + (MIN_MATCH-1)]), \
+-    match_head = s->prev[(str) & s->w_mask] = s->head[s->ins_h], \
+-    s->head[s->ins_h] = (Pos)(str))
++    match_head = s->prev[(str) & s->w_mask] = s->head[s->ins_h];
+ #endif
++    s->head[s->ins_h] = (Pos)str;
++    return match_head;
++}
++
++#if defined(__ARM_FEATURE_CRC32)
++#include "contrib/arm/insert_string_acle.h"
++#endif
++static inline Pos insert_string(deflate_state *s, Pos str) {
++#if defined(__ARM_FEATURE_CRC32)
++    return insert_string_acle(s, str);
++#else
++    return insert_string_c(s, str);
++#endif
++}
+ 
+ /* ===========================================================================
+  * Initialize the hash table (avoiding 64K overflow for 16 bit systems).
+@@ -427,11 +439,7 @@ int ZEXPORT deflateSetDictionary (strm, dictionary, dictLength)
+         str = s->strstart;
+         n = s->lookahead - (MIN_MATCH-1);
+         do {
+-            UPDATE_HASH(s, s->ins_h, s->window[str + MIN_MATCH-1]);
+-#ifndef FASTEST
+-            s->prev[str & s->w_mask] = s->head[s->ins_h];
+-#endif
+-            s->head[s->ins_h] = (Pos)str;
++			insert_string(s, str);
+             str++;
+         } while (--n);
+         s->strstart = str;
+@@ -1859,7 +1867,7 @@ local block_state deflate_fast(s, flush)
+          */
+         hash_head = NIL;
+         if (s->lookahead >= MIN_MATCH) {
+-            INSERT_STRING(s, s->strstart, hash_head);
++            hash_head = insert_string(s, s->strstart);
+         }
+ 
+         /* Find the longest match, discarding those <= prev_length.
+@@ -1890,7 +1898,7 @@ local block_state deflate_fast(s, flush)
+                 s->match_length--; /* string at strstart already in table */
+                 do {
+                     s->strstart++;
+-                    INSERT_STRING(s, s->strstart, hash_head);
++                    hash_head = insert_string(s, s->strstart);
+                     /* strstart never exceeds WSIZE-MAX_MATCH, so there are
+                      * always MIN_MATCH bytes ahead.
+                      */
+@@ -1962,7 +1970,7 @@ local block_state deflate_slow(s, flush)
+          */
+         hash_head = NIL;
+         if (s->lookahead >= MIN_MATCH) {
+-            INSERT_STRING(s, s->strstart, hash_head);
++            hash_head = insert_string(s, s->strstart);
+         }
+ 
+         /* Find the longest match, discarding those <= prev_length.
+@@ -2013,7 +2021,7 @@ local block_state deflate_slow(s, flush)
+             s->prev_length -= 2;
+             do {
+                 if (++s->strstart <= max_insert) {
+-                    INSERT_STRING(s, s->strstart, hash_head);
++                    hash_head = insert_string(s, s->strstart);
+                 }
+             } while (--s->prev_length != 0);
+             s->match_available = 0;
+-- 
+1.8.3.1
+
