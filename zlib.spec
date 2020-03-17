@@ -29,6 +29,8 @@ Patch9: zlib-1.2.11-firefox-crash-fix.patch
 Patch10: 0004-compute-crc32-using-armv8-specific-instruction.patch
 # ARM optimized insert_string
 Patch11: 0005-ARM-optimized-insert_string.patch
+# ARM optimized inflate_fast
+Patch12: 0006-inflate-improve-performance-of-memory-copy-operation.patch
 
 BuildRequires: automake, autoconf, libtool
 
@@ -101,6 +103,7 @@ developing applications which use minizip.
 %ifarch aarch64
 %patch10 -p1
 %patch11 -p1
+%patch12 -p1
 %endif
 
 iconv -f iso-8859-2 -t utf-8 < ChangeLog > ChangeLog.tmp
@@ -198,7 +201,7 @@ find $RPM_BUILD_ROOT -name '*.la' -delete
 
 %changelog
 * Thu Mar 5 2020 Chunmei Xu <xuchunmei@linux.alibaba.con> - 1.2.11-20.4.alnx
-- ARM optimized insert_string
+- ARM optimized insert_string and inflate_fast
 
 * Tue Mar 3 2020 Chunmei Xu <xuchunmei@linux.alibaba.con> - 1.2.11-20.3.alnx
 - add ldconfig in %post and %postun
